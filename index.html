@@ -147,6 +147,23 @@
   .btn-add-store { width: 100%; background: none; border: 1px dashed var(--border2); border-radius: 10px; padding: 10px; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 0.88rem; cursor: pointer; transition: border-color 0.2s, color 0.2s; margin-top: 4px; }
   .btn-add-store:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* PLANTILLAS */
+  .tpl-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tpl-select { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 10px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.85rem; }
+  .btn-tpl-save { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 9px 10px; color: var(--text2); font-size: 0.85rem; cursor: pointer; white-space: nowrap; font-family: 'DM Sans', sans-serif; transition: border-color 0.2s, color 0.2s; }
+  .btn-tpl-save:hover { border-color: var(--accent); color: var(--accent); }
+  .tpl-note { font-size: 0.78rem; color: var(--accent2); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .tpl-save-panel { background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px; padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .day-toggle-row { display: flex; gap: 4px; }
+  .day-toggle { flex: 1; text-align: center; background: var(--card2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 0; font-size: 0.78rem; color: var(--text3); cursor: pointer; font-family: 'DM Sans', sans-serif; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+  .day-toggle.selected { border-color: var(--accent); color: var(--accent2); background: rgba(74,158,255,0.12); }
+  .tpl-save-actions { display: flex; gap: 8px; }
+  .tpl-save-actions .btn-primary, .tpl-save-actions .btn-secondary { padding: 9px; font-size: 0.85rem; }
+  .tpl-list-manage { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .tpl-manage-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text2); background: var(--bg3); border-radius: 8px; padding: 6px 10px; }
+  .tpl-manage-row .tpl-manage-name { flex: 1; }
+  .tpl-manage-row .tpl-manage-days { color: var(--text3); font-size: 0.75rem; }
+
   /* HISTORIAL */
   .history-empty { text-align: center; color: var(--text3); padding: 40px 20px; font-size: 0.92rem; }
   .history-date-group { margin-bottom: 20px; }
@@ -346,7 +363,7 @@
 
 <script>
 // ── DB ─────────────────────────────────────────────────
-const DB_NAME='tareasApp_original', DB_VERSION=1;
+const DB_NAME='tareasApp', DB_VERSION=1;
 let db;
 function openDB() {
   return new Promise((res,rej) => {
@@ -373,7 +390,9 @@ let folders=[], currentFolderId=null, currentTab='pending';
 let editingFolderId=null, editingTaskId=null;
 let selectedEmoji='📋', selectedColor='#4a9eff';
 let customFieldDefs=[], shopEditorData={};
+let tplSavePanelSlug=null, tplSaveDays={}, tplAutoNotes={};
 
+const DAY_LABELS=['D','L','M','X','J','V','S']; // Date.getDay(): 0=domingo...6=sábado
 const EMOJIS=['📋','🛒','🚗','🏠','🌿','💊','📅','✈️','🎯','💡','🔧','📦','🎁','🏥','📚','🍽️','💪','🎵','🐾','⚡'];
 const COLORS=['#4a9eff','#7bbfff','#56d4a0','#f39c12','#e74c3c','#9b59b6','#1abc9c','#e67e22','#ec407a','#00bcd4'];
 
@@ -658,6 +677,7 @@ function openTaskModal(editId=null){
   document.getElementById('task-modal-title').textContent=editId?'Editar tarea':'Nueva tarea';
   const shopFields=(folder&&folder.customFields||[]).filter(f=>f.type==='shoplist'&&f.name);
   if(editId){
+    tplAutoNotes={};
     dbGetAll('tasks').then(all=>{
       const t=all.find(x=>x.id===editId);
       document.getElementById('task-title-input').value=t.title;
@@ -674,7 +694,19 @@ function openTaskModal(editId=null){
     document.getElementById('task-title-input').value='';
     document.getElementById('task-date-input').value='';
     document.getElementById('task-notes-input').value='';
-    shopFields.forEach(f=>{shopEditorData[slugify(f.name)]=[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];});
+    tplAutoNotes={};
+    const todayDay=new Date().getDay();
+    shopFields.forEach(f=>{
+      const slug=slugify(f.name);
+      const matches=((folder&&folder.templates&&folder.templates[slug])||[]).filter(t=>t.days.includes(todayDay));
+      if(matches.length===1){
+        const tpl=matches[0];
+        shopEditorData[slug]=tpl.stores.length?JSON.parse(JSON.stringify(tpl.stores)).map(st=>({...st,itemsChecked:[]})):[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
+        tplAutoNotes[slug]=`Plantilla "${tpl.name}" aplicada automáticamente`;
+      } else {
+        shopEditorData[slug]=[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
+      }
+    });
     buildCustomTaskInputs(folder,{});
     document.getElementById('modal-task').classList.add('open');
   }
@@ -700,10 +732,93 @@ function buildCustomTaskInputs(folder,values){
   fields.filter(f=>f.type==='shoplist'&&f.name).forEach(f=>renderShopEditor(slugify(f.name)));
 }
 
+function getFolderTemplates(slug){
+  const folder=folders.find(f=>f.id===currentFolderId);
+  return (folder&&folder.templates&&folder.templates[slug])||[];
+}
+async function persistTemplates(slug,list){
+  const folder=folders.find(f=>f.id===currentFolderId);
+  if(!folder)return;
+  if(!folder.templates)folder.templates={};
+  folder.templates[slug]=list;
+  await dbPut('folders',folder);
+}
+function renderTemplateBar(slug){
+  const bar=document.getElementById(`tpl-bar-${slug}`);if(!bar)return;
+  const tpls=getFolderTemplates(slug);
+  const note=tplAutoNotes[slug];
+  bar.innerHTML=`
+    ${note?`<div class="tpl-note">✓ ${esc(note)}</div>`:''}
+    <div class="tpl-bar">
+      <select class="tpl-select" onchange="if(this.value){applyTemplate('${slug}',this.value);this.value='';}">
+        <option value="">${tpls.length?'Aplicar plantilla…':'Sin plantillas guardadas'}</option>
+        ${tpls.map(t=>`<option value="${t.id}">${esc(t.name)}${t.days.length?' ('+t.days.map(d=>DAY_LABELS[d]).join('')+')':''}</option>`).join('')}
+      </select>
+      <button class="btn-tpl-save" onclick="toggleTplSavePanel('${slug}')">💾</button>
+    </div>
+    <div id="tpl-save-panel-${slug}"></div>
+    ${tpls.length?`<div class="tpl-list-manage">${tpls.map(t=>`
+      <div class="tpl-manage-row">
+        <span class="tpl-manage-name">${esc(t.name)}</span>
+        <span class="tpl-manage-days">${t.days.length?t.days.map(d=>DAY_LABELS[d]).join(''):'sin días'}</span>
+        <button class="btn-icon del" onclick="deleteTemplate('${slug}','${t.id}')">✕</button>
+      </div>`).join('')}</div>`:''}
+  `;
+}
+function toggleTplSavePanel(slug){
+  const panel=document.getElementById(`tpl-save-panel-${slug}`);if(!panel)return;
+  if(tplSavePanelSlug===slug){tplSavePanelSlug=null;panel.innerHTML='';return;}
+  tplSavePanelSlug=slug;tplSaveDays[slug]=tplSaveDays[slug]||[];
+  panel.innerHTML=`
+    <div class="tpl-save-panel">
+      <input class="form-input" id="tpl-name-${slug}" placeholder="Nombre de la plantilla (ej: Ruta L/X/V)">
+      <div class="day-toggle-row" id="tpl-days-${slug}">
+        ${DAY_LABELS.map((l,i)=>`<div class="day-toggle" onclick="toggleTplDay('${slug}',${i})">${l}</div>`).join('')}
+      </div>
+      <div class="tpl-save-actions">
+        <button class="btn-secondary" style="flex:1" onclick="toggleTplSavePanel('${slug}')">Cancelar</button>
+        <button class="btn-primary" style="flex:1" onclick="confirmSaveTemplate('${slug}')">Guardar</button>
+      </div>
+    </div>`;
+}
+function toggleTplDay(slug,day){
+  const arr=tplSaveDays[slug]||(tplSaveDays[slug]=[]);
+  const idx=arr.indexOf(day);
+  if(idx>-1)arr.splice(idx,1);else arr.push(day);
+  const btns=document.querySelectorAll(`#tpl-days-${slug} .day-toggle`);
+  btns.forEach((b,i)=>b.classList.toggle('selected',arr.includes(i)));
+}
+async function confirmSaveTemplate(slug){
+  const nameEl=document.getElementById(`tpl-name-${slug}`);
+  const name=nameEl.value.trim();
+  if(!name){nameEl.focus();return;}
+  const days=(tplSaveDays[slug]||[]).slice().sort();
+  const stores=JSON.parse(JSON.stringify((shopEditorData[slug]||[]).map(st=>({store:st.store,items:(st.items||[]).filter(i=>i.name.trim())})).filter(st=>st.store||st.items.length)));
+  const tpls=getFolderTemplates(slug);
+  tpls.push({id:uid(),name,days,stores});
+  await persistTemplates(slug,tpls);
+  tplSaveDays[slug]=[];
+  toggleTplSavePanel(slug);
+  renderTemplateBar(slug);
+}
+async function deleteTemplate(slug,id){
+  if(!confirm('¿Eliminar esta plantilla?'))return;
+  const tpls=getFolderTemplates(slug).filter(t=>t.id!==id);
+  await persistTemplates(slug,tpls);
+  renderTemplateBar(slug);
+}
+function applyTemplate(slug,templateId){
+  const tpl=getFolderTemplates(slug).find(t=>t.id===templateId);if(!tpl)return;
+  shopEditorData[slug]=tpl.stores.length?JSON.parse(JSON.stringify(tpl.stores)).map(st=>({...st,itemsChecked:[]})):[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
+  delete tplAutoNotes[slug];
+  renderShopEditor(slug);
+}
+
 function renderShopEditor(slug){
   const container=document.getElementById(`shop-editor-${slug}`);if(!container)return;
   const stores=shopEditorData[slug]||[];
-  container.innerHTML=stores.map((st,si)=>`
+  const tplBarHTML=`<div id="tpl-bar-${slug}"></div>`;
+  container.innerHTML=tplBarHTML+stores.map((st,si)=>`
     <div class="shop-store-editor">
       <div class="shop-store-editor-header">
         <span>🏪</span>
@@ -720,6 +835,7 @@ function renderShopEditor(slug){
         <button class="btn-add-item" onclick="addItem('${slug}',${si})">＋ Añadir artículo</button>
       </div>
     </div>`).join('');
+  renderTemplateBar(slug);
 }
 function addStore(slug){if(!shopEditorData[slug])shopEditorData[slug]=[];shopEditorData[slug].push({store:'',items:[{name:'',qty:''}],itemsChecked:[]});renderShopEditor(slug);}
 function removeStore(slug,si){shopEditorData[slug].splice(si,1);renderShopEditor(slug);}
