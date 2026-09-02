@@ -390,7 +390,7 @@ let folders=[], currentFolderId=null, currentTab='pending';
 let editingFolderId=null, editingTaskId=null;
 let selectedEmoji='📋', selectedColor='#4a9eff';
 let customFieldDefs=[], shopEditorData={};
-let tplSavePanelSlug=null, tplSaveDays={}, tplAutoNotes={};
+let tplSavePanelSlug=null, tplSaveDays={}, tplAutoNotes={}, tplEditorData={};
 
 const DAY_LABELS=['D','L','M','X','J','V','S']; // Date.getDay(): 0=domingo...6=sábado
 const EMOJIS=['📋','🛒','🚗','🏠','🌿','💊','📅','✈️','🎯','💡','🔧','📦','🎁','🏥','📚','🍽️','💪','🎵','🐾','⚡'];
@@ -769,17 +769,52 @@ function toggleTplSavePanel(slug){
   const panel=document.getElementById(`tpl-save-panel-${slug}`);if(!panel)return;
   if(tplSavePanelSlug===slug){tplSavePanelSlug=null;panel.innerHTML='';return;}
   tplSavePanelSlug=slug;tplSaveDays[slug]=tplSaveDays[slug]||[];
+  tplEditorData[slug]=[{store:'',items:[{name:'',qty:''}]}];
   panel.innerHTML=`
     <div class="tpl-save-panel">
       <input class="form-input" id="tpl-name-${slug}" placeholder="Nombre de la plantilla (ej: Ruta L/X/V)">
       <div class="day-toggle-row" id="tpl-days-${slug}">
         ${DAY_LABELS.map((l,i)=>`<div class="day-toggle" onclick="toggleTplDay('${slug}',${i})">${l}</div>`).join('')}
       </div>
+      <div id="tpl-stores-${slug}"></div>
+      <button class="btn-add-store" onclick="addTplStore('${slug}')">＋ Añadir establecimiento</button>
+      ${(shopEditorData[slug]||[]).some(st=>st.store||(st.items||[]).some(i=>i.name.trim()))?`<button class="btn-tpl-save" style="width:100%" onclick="copyFromFormToTpl('${slug}')">📋 Copiar lo que hay en este formulario</button>`:''}
       <div class="tpl-save-actions">
         <button class="btn-secondary" style="flex:1" onclick="toggleTplSavePanel('${slug}')">Cancelar</button>
-        <button class="btn-primary" style="flex:1" onclick="confirmSaveTemplate('${slug}')">Guardar</button>
+        <button class="btn-primary" style="flex:1" onclick="confirmSaveTemplate('${slug}')">Guardar plantilla</button>
       </div>
     </div>`;
+  renderTplStoreEditor(slug);
+}
+function renderTplStoreEditor(slug){
+  const container=document.getElementById(`tpl-stores-${slug}`);if(!container)return;
+  const stores=tplEditorData[slug]||[];
+  container.innerHTML=stores.map((st,si)=>`
+    <div class="shop-store-editor">
+      <div class="shop-store-editor-header">
+        <span>🏪</span>
+        <input class="form-input" placeholder="Mercadona, Mercado, Lidl…" value="${esc(st.store)}" oninput="tplEditorData['${slug}'][${si}].store=this.value">
+        ${stores.length>1?`<button class="btn-icon del" onclick="removeTplStore('${slug}',${si})">✕</button>`:''}
+      </div>
+      <div class="shop-items-editor">
+        ${(st.items||[]).map((item,ii)=>`
+          <div class="shop-item-row">
+            <input class="form-input item-name" placeholder="Artículo" value="${esc(item.name)}" oninput="tplEditorData['${slug}'][${si}].items[${ii}].name=this.value">
+            <input class="form-input item-qty" placeholder="Cant." value="${esc(item.qty)}" oninput="tplEditorData['${slug}'][${si}].items[${ii}].qty=this.value">
+            ${st.items.length>1?`<button class="btn-icon del" onclick="removeTplItem('${slug}',${si},${ii})">✕</button>`:''}
+          </div>`).join('')}
+        <button class="btn-add-item" onclick="addTplItem('${slug}',${si})">＋ Añadir artículo</button>
+      </div>
+    </div>`).join('');
+}
+function addTplStore(slug){if(!tplEditorData[slug])tplEditorData[slug]=[];tplEditorData[slug].push({store:'',items:[{name:'',qty:''}]});renderTplStoreEditor(slug);}
+function removeTplStore(slug,si){tplEditorData[slug].splice(si,1);renderTplStoreEditor(slug);}
+function addTplItem(slug,si){tplEditorData[slug][si].items.push({name:'',qty:''});renderTplStoreEditor(slug);}
+function removeTplItem(slug,si,ii){tplEditorData[slug][si].items.splice(ii,1);renderTplStoreEditor(slug);}
+function copyFromFormToTpl(slug){
+  tplEditorData[slug]=JSON.parse(JSON.stringify((shopEditorData[slug]||[]).map(st=>({store:st.store,items:(st.items||[]).map(i=>({name:i.name,qty:i.qty}))}))));
+  if(!tplEditorData[slug].length)tplEditorData[slug]=[{store:'',items:[{name:'',qty:''}]}];
+  renderTplStoreEditor(slug);
 }
 function toggleTplDay(slug,day){
   const arr=tplSaveDays[slug]||(tplSaveDays[slug]=[]);
@@ -793,11 +828,11 @@ async function confirmSaveTemplate(slug){
   const name=nameEl.value.trim();
   if(!name){nameEl.focus();return;}
   const days=(tplSaveDays[slug]||[]).slice().sort();
-  const stores=JSON.parse(JSON.stringify((shopEditorData[slug]||[]).map(st=>({store:st.store,items:(st.items||[]).filter(i=>i.name.trim())})).filter(st=>st.store||st.items.length)));
+  const stores=JSON.parse(JSON.stringify((tplEditorData[slug]||[]).map(st=>({store:st.store,items:(st.items||[]).filter(i=>i.name.trim())})).filter(st=>st.store||st.items.length)));
   const tpls=getFolderTemplates(slug);
   tpls.push({id:uid(),name,days,stores});
   await persistTemplates(slug,tpls);
-  tplSaveDays[slug]=[];
+  tplSaveDays[slug]=[];tplEditorData[slug]=[];
   toggleTplSavePanel(slug);
   renderTemplateBar(slug);
 }
