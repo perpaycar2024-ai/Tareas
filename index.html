@@ -317,7 +317,7 @@
     </div>
     <div class="form-group">
       <label class="form-label">Fecha</label>
-      <input class="form-input" type="date" id="task-date-input">
+      <input class="form-input" type="date" id="task-date-input" onchange="onTaskDateChange()">
     </div>
     <div class="form-group">
       <label class="form-label">Notas</label>
@@ -695,17 +695,8 @@ function openTaskModal(editId=null){
     document.getElementById('task-date-input').value='';
     document.getElementById('task-notes-input').value='';
     tplAutoNotes={};
-    const todayDay=new Date().getDay();
     shopFields.forEach(f=>{
-      const slug=slugify(f.name);
-      const matches=((folder&&folder.templates&&folder.templates[slug])||[]).filter(t=>t.days.includes(todayDay));
-      if(matches.length===1){
-        const tpl=matches[0];
-        shopEditorData[slug]=tpl.stores.length?JSON.parse(JSON.stringify(tpl.stores)).map(st=>({...st,itemsChecked:[]})):[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
-        tplAutoNotes[slug]=`Plantilla "${tpl.name}" aplicada automáticamente`;
-      } else {
-        shopEditorData[slug]=[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
-      }
+      shopEditorData[slugify(f.name)]=[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
     });
     buildCustomTaskInputs(folder,{});
     document.getElementById('modal-task').classList.add('open');
@@ -841,6 +832,34 @@ async function deleteTemplate(slug,id){
   const tpls=getFolderTemplates(slug).filter(t=>t.id!==id);
   await persistTemplates(slug,tpls);
   renderTemplateBar(slug);
+}
+function isShopFieldEmpty(slug){
+  const stores=shopEditorData[slug]||[];
+  return !stores.some(st=>(st.store||'').trim()||(st.items||[]).some(i=>(i.name||'').trim()));
+}
+function onTaskDateChange(){
+  const folder=folders.find(f=>f.id===currentFolderId);if(!folder)return;
+  const dateStr=document.getElementById('task-date-input').value;
+  const shopFields=(folder.customFields||[]).filter(f=>f.type==='shoplist'&&f.name);
+  if(!dateStr){
+    shopFields.forEach(f=>{delete tplAutoNotes[slugify(f.name)];});
+    shopFields.forEach(f=>renderTemplateBar(slugify(f.name)));
+    return;
+  }
+  const day=new Date(dateStr+'T00:00:00').getDay();
+  shopFields.forEach(f=>{
+    const slug=slugify(f.name);
+    if(!isShopFieldEmpty(slug))return; // no pisar datos ya metidos a mano
+    const matches=((folder.templates&&folder.templates[slug])||[]).filter(t=>t.days.includes(day));
+    if(matches.length===1){
+      const tpl=matches[0];
+      shopEditorData[slug]=tpl.stores.length?JSON.parse(JSON.stringify(tpl.stores)).map(st=>({...st,itemsChecked:[]})):[{store:'',items:[{name:'',qty:''}],itemsChecked:[]}];
+      tplAutoNotes[slug]=`Plantilla "${tpl.name}" aplicada automáticamente`;
+    } else {
+      delete tplAutoNotes[slug];
+    }
+    renderShopEditor(slug);
+  });
 }
 function applyTemplate(slug,templateId){
   const tpl=getFolderTemplates(slug).find(t=>t.id===templateId);if(!tpl)return;
