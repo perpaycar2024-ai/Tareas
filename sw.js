@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tareas-v7';
+const CACHE_NAME = 'tareas-v8';
 const ASSETS = [
   './infex.html',
   './manifest.json'
