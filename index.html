@@ -659,11 +659,11 @@ const monthLabelOf=k=>{if(k==='nodate')return 'Sin fecha';const [y,m]=k.split('-
 
 // ── BÚSQUEDA EN HISTORIAL ──
 let historyQuery='';
-const normTxt=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+const normTxt=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 function normMap(s){ // texto normalizado + índice de cada carácter en el original
   let n='';const map=[];
   for(let i=0;i<s.length;i++){
-    const c=s[i].normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+    const c=s[i].normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
     for(let j=0;j<c.length;j++){n+=c[j];map.push(i);}
   }
   return {n,map};
@@ -784,7 +784,7 @@ function taskCardHTML(t,folder,isHistory){
       const items=st.items||[];
       const checked=(st.itemsChecked||[]).filter(Boolean).length;
       return `<div class="shop-store-block">
-        <div class="shop-store-header"><span>🏪</span><span class="shop-store-name">${esc(st.store||'Sin nombre')}</span><span class="shop-store-count">${checked}/${items.length}</span></div>
+        <div class="shop-store-header"><span>🏪</span><span class="shop-store-name">${esc(st.store||'Sin nombre')}</span><span class="shop-store-count">${t.done?items.length:checked+'/'+items.length}</span></div>
         <div class="shop-items">${items.map((item,ii)=>{
           const isChk=(st.itemsChecked||[])[ii];
           return `<div class="shop-item">
@@ -1077,6 +1077,8 @@ const editTask=id=>openTaskModal(id);
 async function toggleTask(id){
   const all=await dbGetAll('tasks'),t=all.find(x=>x.id===id);
   t.done=!t.done;t.doneAt=t.done?Date.now():null;
+  // al pasar al historial, las listas se guardan sin tachar
+  if(t.done)Object.values(t.custom||{}).forEach(v=>{if(Array.isArray(v))v.forEach(st=>{st.itemsChecked=[];});});
   await dbPut('tasks',t);renderFolderDetail();
 }
 async function restoreTask(id){
@@ -1107,7 +1109,7 @@ async function openPdfModal(){
   const all=await dbIdx('tasks','folderId',currentFolderId);
   pdfTasks=all.filter(t=>t.done);
   const map={};
-  pdfTasks.forEach(t=>{const k=monthKeyOf(t.doneAt);map[k]=(map[k]||0)+1;});
+  pdfTasks.forEach(t=>{const k=monthKeyOf(entryTs(t));map[k]=(map[k]||0)+1;});
   const keys=Object.keys(map).filter(k=>k!=='nodate').sort().reverse();
   if(map.nodate)keys.push('nodate');
   pdfMonths=keys.map(k=>({key:k,label:monthLabelOf(k),count:map[k]}));
@@ -1170,13 +1172,15 @@ async function generatePdf(){
 }
 
 // jsPDF usa Helvetica (Latin-1): se limpian emojis y símbolos fuera de rango
-const pdfSafe=s=>String(s==null?'':s).replace(/\r/g,'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,'...').replace(/[^\n\x20-\x7E -ÿ–—•€]/g,'');
+const pdfSafe=s=>String(s==null?'':s).replace(/\r/g,'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,'...').replace(/[^\n\x20-\x7E\xA0-\xFF–—•€]/g,'');
 const p2=n=>String(n).padStart(2,'0');
 const fmtDate=ts=>{const d=new Date(ts);return `${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()}`;};
 const fmtTime=ts=>{const d=new Date(ts);return `${p2(d.getHours())}:${p2(d.getMinutes())}`;};
 const fmtDayLong=ts=>{const d=new Date(ts);return `${DAYS_ES[d.getDay()]}, ${d.getDate()} de ${MONTHS_ES[d.getMonth()]} de ${d.getFullYear()}`;};
 const isoES=s=>/^\d{4}-\d{2}-\d{2}$/.test(String(s))?String(s).split('-').reverse().join('/'):String(s);
 const dayKeyOf=ts=>{if(!ts)return 'nodate';const d=new Date(ts);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());};
+// día de registro = campo "fecha" de la entrada; si no tiene, el día en que se completó
+const entryTs=t=>t.date?new Date(t.date+'T00:00:00').getTime():t.doneAt;
 
 function buildPdf(folder,keys){
   const {jsPDF}=window.jspdf;
@@ -1204,7 +1208,7 @@ function buildPdf(folder,keys){
 
   // datos
   const byMonth={};
-  pdfTasks.forEach(t=>{const k=monthKeyOf(t.doneAt);if(keys.includes(k))(byMonth[k]=byMonth[k]||[]).push(t);});
+  pdfTasks.forEach(t=>{const k=monthKeyOf(entryTs(t));if(keys.includes(k))(byMonth[k]=byMonth[k]||[]).push(t);});
   const total=keys.reduce((a,k)=>a+(byMonth[k]||[]).length,0);
 
   // texto de periodo
@@ -1260,10 +1264,10 @@ function buildPdf(folder,keys){
 
   // ── MESES ──
   keys.forEach(k=>{
-    const tasks=(byMonth[k]||[]).slice().sort((a,b)=>(a.doneAt||0)-(b.doneAt||0)||(a.createdAt||0)-(b.createdAt||0));
+    const tasks=(byMonth[k]||[]).slice().sort((a,b)=>(entryTs(a)||0)-(entryTs(b)||0)||(a.doneAt||0)-(b.doneAt||0)||(a.createdAt||0)-(b.createdAt||0));
     curLabel=monthLabelOf(k);
     doc.addPage();pageLabel[pageNo()]=curLabel;monthPage[k]=pageNo();y=TOP;
-    const dayCount={};tasks.forEach(t=>{const d=dayKeyOf(t.doneAt);dayCount[d]=(dayCount[d]||0)+1;});
+    const dayCount={};tasks.forEach(t=>{const d=dayKeyOf(entryTs(t));dayCount[d]=(dayCount[d]||0)+1;});
     // banner de mes
     doc.setFillColor(...NAVY);doc.rect(M,y,PW-2*M,18,'F');
     doc.setFillColor(...BLUE);doc.rect(M,y+18,PW-2*M,1.2,'F');
@@ -1274,11 +1278,11 @@ function buildPdf(folder,keys){
 
     let lastDay=null;
     tasks.forEach(t=>{
-      const dk=dayKeyOf(t.doneAt);
+      const dk=dayKeyOf(entryTs(t));
       if(dk!==lastDay){
         lastDay=dk;
         ensure(10+20);
-        T(t.doneAt?cap(fmtDayLong(t.doneAt)):'Sin fecha de completado',M,y,{size:11.5,bold:true,color:NAVY});
+        T(entryTs(t)?cap(fmtDayLong(entryTs(t))):'Sin fecha',M,y,{size:11.5,bold:true,color:NAVY});
         T(`${dayCount[dk]} registro${dayCount[dk]!==1?'s':''}`,PW-M,y+1,{size:8.5,color:GREY,align:'right'});
         doc.setDrawColor(...LINE);doc.setLineWidth(0.3);doc.line(M,y+6.4,PW-M,y+6.4);
         y+=10;
@@ -1311,8 +1315,8 @@ function buildPdf(folder,keys){
         if(!Array.isArray(v)||!v.length)return;
         const lines=[];
         v.forEach(st=>{
-          const items=st.items||[],chk=(st.itemsChecked||[]).filter(Boolean).length;
-          lines.push({t:`${pdfSafe(st.store)||'Sin nombre'}  (${chk}/${items.length})`,bold:true,gap:true});
+          const items=st.items||[];
+          lines.push({t:`${pdfSafe(st.store)||'Sin nombre'}  (${items.length})`,bold:true,gap:true});
           items.forEach((it,i)=>lines.push({t:pdfSafe(it.name),qty:it.qty?pdfSafe(it.qty):'',box:(st.itemsChecked||[])[i]?'x':'o'}));
         });
         rows.push([pdfSafe(c.name),lines]);
@@ -1379,7 +1383,7 @@ function buildPdf(folder,keys){
   }
 
   // ── GUARDAR ──
-  const slug=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'diario';
+  const slug=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'diario';
   let part;
   if(keys.length===1)part=keys[0]==='nodate'?'sin-fecha':keys[0];
   else if(contiguous)part=`${real[0]}_a_${real[real.length-1]}`;
